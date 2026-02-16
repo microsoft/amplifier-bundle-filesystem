@@ -1,3 +1,12 @@
+---
+bundle:
+  name: filesystem
+  version: 1.0.0
+  description: Filesystem tools and behaviors for Amplifier agents
+includes:
+  - behavior: ./behaviors/apply-patch.yaml
+---
+
 # Filesystem Bundle
 
 Composes filesystem-related tools and behaviors for Amplifier agents.
