@@ -1,0 +1,14 @@
+# Apply Patch behavior — V4A diff-based file editing
+#
+# Use this behavior to give an agent the apply_patch tool.
+# Configure engine: "native" for OpenAI models, "function" for any provider.
+
+modules:
+  - module: tool-apply-patch
+    config:
+      engine: native
+      allowed_write_paths: ["."]
+      denied_write_paths: []
+
+context:
+  - editing-guidance.md
