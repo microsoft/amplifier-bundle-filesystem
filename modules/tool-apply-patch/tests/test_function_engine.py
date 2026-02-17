@@ -320,6 +320,101 @@ class TestFunctionEngineErrors:
         assert result.success is False
 
 
+class TestFunctionEngineSelfHealingErrors:
+    """Error responses include current file content so models can self-correct."""
+
+    @pytest.mark.asyncio
+    async def test_context_mismatch_includes_current_content(
+        self, tmp_path: Path
+    ) -> None:
+        """Context mismatch error should include the file's actual content."""
+        (tmp_path / "file.py").write_text("actual_line_one\nactual_line_two\n")
+        engine = _make_engine(tmp_path)
+        patch = "\n".join(
+            [
+                "*** Begin Patch",
+                "*** Update File: file.py",
+                "@@ wrong_context",
+                "-wrong_line",
+                "+replacement",
+                "*** End Patch",
+            ]
+        )
+        result = await engine.execute({"patch": patch})
+        assert result.success is False
+        assert result.error is not None
+        msg = result.error["message"]
+        assert "actual_line_one" in msg
+        assert "actual_line_two" in msg
+        assert "Read the file" not in msg
+        assert "Construct a new diff" in msg
+
+    @pytest.mark.asyncio
+    async def test_context_mismatch_includes_line_numbers(self, tmp_path: Path) -> None:
+        """Content hint should include line numbers for diff construction."""
+        (tmp_path / "file.py").write_text("alpha\nbeta\ngamma\n")
+        engine = _make_engine(tmp_path)
+        patch = "\n".join(
+            [
+                "*** Begin Patch",
+                "*** Update File: file.py",
+                "@@ wrong",
+                "-nope",
+                "+yes",
+                "*** End Patch",
+            ]
+        )
+        result = await engine.execute({"patch": patch})
+        assert result.success is False
+        assert result.error is not None
+        msg = result.error["message"]
+        assert "1\talpha" in msg
+        assert "2\tbeta" in msg
+        assert "3\tgamma" in msg
+
+    @pytest.mark.asyncio
+    async def test_file_already_exists_includes_current_content(
+        self, tmp_path: Path
+    ) -> None:
+        """File-already-exists error should include the file's current content."""
+        (tmp_path / "existing.py").write_text("original_content\n")
+        engine = _make_engine(tmp_path)
+        patch = "\n".join(
+            [
+                "*** Begin Patch",
+                "*** Add File: existing.py",
+                "+new_content",
+                "*** End Patch",
+            ]
+        )
+        result = await engine.execute({"patch": patch})
+        assert result.success is False
+        assert result.error is not None
+        msg = result.error["message"]
+        assert "already exists" in msg.lower()
+        assert "update_file" in msg.lower()
+        assert "original_content" in msg
+
+    @pytest.mark.asyncio
+    async def test_file_already_exists_suggests_update(self, tmp_path: Path) -> None:
+        """Function engine file-exists error should now suggest update_file."""
+        (tmp_path / "config.yaml").write_text("key: value\n")
+        engine = _make_engine(tmp_path)
+        patch = "\n".join(
+            [
+                "*** Begin Patch",
+                "*** Add File: config.yaml",
+                "+key: new_value",
+                "*** End Patch",
+            ]
+        )
+        result = await engine.execute({"patch": patch})
+        assert result.success is False
+        assert result.error is not None
+        # Function engine should now suggest update_file (previously it didn't)
+        assert "update_file" in result.error["message"].lower()
+
+
 class TestFunctionEngineEnrichedDescription:
     """Function engine description should be self-sufficient for V4A format guidance."""
 

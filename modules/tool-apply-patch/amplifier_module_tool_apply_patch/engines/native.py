@@ -31,6 +31,39 @@ _V4A_MARKERS = (
     "*** Delete File:",
 )
 
+# Maximum lines to include in self-healing error responses.
+# Keeps error messages practical for models without overwhelming context.
+_MAX_CONTENT_HINT_LINES = 200
+
+
+def _format_content_hint(content: str, path: str) -> str:
+    """Format file content for error messages so models can self-correct.
+
+    When a patch fails (context mismatch, file already exists), including the
+    current file content lets the model construct a correct diff on the next
+    attempt — breaking retry loops without a separate read_file round-trip.
+    """
+    if not content:
+        return "\n\nFile is empty (0 lines)."
+
+    lines = content.splitlines()
+    total = len(lines)
+
+    if total <= _MAX_CONTENT_HINT_LINES:
+        numbered = "\n".join(f"{i + 1}\t{line}" for i, line in enumerate(lines))
+    else:
+        head_n = _MAX_CONTENT_HINT_LINES * 2 // 3
+        tail_n = _MAX_CONTENT_HINT_LINES - head_n
+        head = "\n".join(f"{i + 1}\t{line}" for i, line in enumerate(lines[:head_n]))
+        tail_start = total - tail_n
+        tail = "\n".join(
+            f"{i + 1}\t{line}" for i, line in enumerate(lines[tail_start:], tail_start)
+        )
+        omitted = total - head_n - tail_n
+        numbered = f"{head}\n... [{omitted} lines omitted] ...\n{tail}"
+
+    return f"\n\nCurrent content of {path} ({total} lines):\n{numbered}"
+
 
 class NativeEngine:
     """Native engine: handles pre-parsed operations from the Responses API.
@@ -137,13 +170,20 @@ class NativeEngine:
 
         # Reject create_file if file already exists — the model should use update_file instead.
         # Without this check, the model gets a success signal and may loop indefinitely.
+        # Include current content so the model can immediately craft an update_file diff.
         if resolved.exists():
+            try:
+                current = resolved.read_text(encoding="utf-8")
+                content_hint = _format_content_hint(current, rel_path)
+            except OSError:
+                content_hint = ""
             return ToolResult(
                 success=False,
                 error={
                     "message": (
                         f"File already exists: {rel_path}. "
                         "Use update_file to modify existing files."
+                        f"{content_hint}"
                     )
                 },
             )
@@ -191,22 +231,38 @@ class NativeEngine:
                     },
                 )
 
+        # Read file before the try so `existing` is always in scope for error handling.
         try:
             existing = resolved.read_text(encoding="utf-8")
+        except OSError as e:
+            return ToolResult(
+                success=False,
+                error={"message": f"OS error reading {rel_path}: {e}"},
+            )
+
+        try:
             updated = apply_diff(existing, diff)
             resolved.write_text(updated, encoding="utf-8")
             await self._emit_event("apply-patch:applied", rel_path, "update")
             return ToolResult(success=True, output=f"M {rel_path}")
         except ValueError as e:
+            # Include current content so the model can construct a correct diff.
+            content_hint = _format_content_hint(existing, rel_path)
             return ToolResult(
                 success=False,
                 error={
-                    "message": f"Context mismatch in {rel_path}: {e} — file may have changed. Read the file and retry."
+                    "message": (
+                        f"Context mismatch in {rel_path}: {e} — "
+                        "your diff does not match the current file."
+                        f"{content_hint}\n\n"
+                        "Construct a new diff based on the content above."
+                    )
                 },
             )
         except OSError as e:
             return ToolResult(
-                success=False, error={"message": f"OS error updating {rel_path}: {e}"}
+                success=False,
+                error={"message": f"OS error updating {rel_path}: {e}"},
             )
 
     async def _delete_file(self, resolved: Path, rel_path: str) -> ToolResult:

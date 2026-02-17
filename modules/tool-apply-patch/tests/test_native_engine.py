@@ -225,6 +225,90 @@ class TestNativeEngineErrors:
         assert result.success is False
 
 
+class TestNativeEngineSelfHealingErrors:
+    """Error responses include current file content so models can self-correct."""
+
+    @pytest.mark.asyncio
+    async def test_context_mismatch_includes_current_content(
+        self, tmp_path: Path
+    ) -> None:
+        """Context mismatch error should include the file's actual content."""
+        (tmp_path / "file.py").write_text("actual_line_one\nactual_line_two\n")
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "file.py",
+                "diff": "@@ wrong_context\n-nope\n+yes",
+            }
+        )
+        assert result.success is False
+        msg = result.error["message"]
+        # Must include the actual file content so the model can construct a correct diff
+        assert "actual_line_one" in msg
+        assert "actual_line_two" in msg
+        # Should NOT say "Read the file and retry" — we already gave the content
+        assert "Read the file" not in msg
+        assert "Construct a new diff" in msg
+
+    @pytest.mark.asyncio
+    async def test_context_mismatch_includes_line_numbers(self, tmp_path: Path) -> None:
+        """Content hint should include line numbers for easier diff construction."""
+        (tmp_path / "file.py").write_text("alpha\nbeta\ngamma\n")
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "file.py",
+                "diff": "@@ wrong\n-nope\n+yes",
+            }
+        )
+        assert result.success is False
+        msg = result.error["message"]
+        assert "1\talpha" in msg
+        assert "2\tbeta" in msg
+        assert "3\tgamma" in msg
+
+    @pytest.mark.asyncio
+    async def test_file_already_exists_includes_current_content(
+        self, tmp_path: Path
+    ) -> None:
+        """File-already-exists error should include the file's current content."""
+        (tmp_path / "existing.py").write_text("original_content\n")
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "existing.py",
+                "diff": "+new_content\n",
+            }
+        )
+        assert result.success is False
+        msg = result.error["message"]
+        assert "already exists" in msg.lower()
+        assert "update_file" in msg
+        # Must include current file content
+        assert "original_content" in msg
+
+    @pytest.mark.asyncio
+    async def test_empty_file_context_mismatch_shows_empty_hint(
+        self, tmp_path: Path
+    ) -> None:
+        """Empty files should get a clear 'empty' hint, not crash."""
+        (tmp_path / "empty.py").write_text("")
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "empty.py",
+                "diff": "@@ something\n-nope\n+yes",
+            }
+        )
+        assert result.success is False
+        msg = result.error["message"]
+        assert "empty" in msg.lower() or "0 lines" in msg
+
+
 class TestNativeEngineV4ADetection:
     """Native engine should detect V4A wrapper markers and return actionable errors."""
 

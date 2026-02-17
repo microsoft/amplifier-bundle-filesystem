@@ -27,6 +27,38 @@ _DELETE_FILE = "*** Delete File: "
 _MOVE_TO = "*** Move to: "
 _END_OF_FILE = "*** End of File"
 
+# Maximum lines to include in self-healing error responses.
+_MAX_CONTENT_HINT_LINES = 200
+
+
+def _format_content_hint(content: str, path: str) -> str:
+    """Format file content for error messages so models can self-correct.
+
+    When a patch fails (context mismatch, file already exists), including the
+    current file content lets the model construct a correct diff on the next
+    attempt — breaking retry loops without a separate read_file round-trip.
+    """
+    if not content:
+        return "\n\nFile is empty (0 lines)."
+
+    lines = content.splitlines()
+    total = len(lines)
+
+    if total <= _MAX_CONTENT_HINT_LINES:
+        numbered = "\n".join(f"{i + 1}\t{line}" for i, line in enumerate(lines))
+    else:
+        head_n = _MAX_CONTENT_HINT_LINES * 2 // 3
+        tail_n = _MAX_CONTENT_HINT_LINES - head_n
+        head = "\n".join(f"{i + 1}\t{line}" for i, line in enumerate(lines[:head_n]))
+        tail_start = total - tail_n
+        tail = "\n".join(
+            f"{i + 1}\t{line}" for i, line in enumerate(lines[tail_start:], tail_start)
+        )
+        omitted = total - head_n - tail_n
+        numbered = f"{head}\n... [{omitted} lines omitted] ...\n{tail}"
+
+    return f"\n\nCurrent content of {path} ({total} lines):\n{numbered}"
+
 
 @dataclass
 class PatchOperation:
@@ -226,7 +258,16 @@ class FunctionEngine:
     async def _apply_add(self, resolved: Path, op: PatchOperation) -> str:
         """Create a new file from +lines."""
         if resolved.exists():
-            raise _PatchError(f"File already exists: {op.path}")
+            # Include current content so the model can craft an update diff instead.
+            try:
+                current = resolved.read_text(encoding="utf-8")
+                content_hint = _format_content_hint(current, op.path)
+            except OSError:
+                content_hint = ""
+            raise _PatchError(
+                f"File already exists: {op.path}. "
+                f"Use update_file to modify existing files.{content_hint}"
+            )
 
         # Create parent directories
         resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -248,8 +289,13 @@ class FunctionEngine:
         try:
             updated = apply_diff(existing, op.diff)
         except ValueError as e:
+            # Include current content so the model can construct a correct diff.
+            content_hint = _format_content_hint(existing, op.path)
             raise _PatchError(
-                f"Context mismatch in {op.path}: {e} — file may have changed. Read the file and retry."
+                f"Context mismatch in {op.path}: {e} — "
+                "your diff does not match the current file."
+                f"{content_hint}\n\n"
+                "Construct a new diff based on the content above."
             ) from e
 
         # Handle rename (Move to)
