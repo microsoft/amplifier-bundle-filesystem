@@ -183,3 +183,104 @@ class TestNativeEngineErrors:
             }
         )
         assert result.success is False
+
+
+class TestNativeEngineV4ADetection:
+    """Native engine should detect V4A wrapper markers and return actionable errors."""
+
+    @pytest.mark.asyncio
+    async def test_begin_patch_in_diff_returns_actionable_error(
+        self, tmp_path: Path
+    ) -> None:
+        """When diff contains '*** Begin Patch', error should mention V4A wrapper markers."""
+        (tmp_path / "file.py").write_text("hello world\n")
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "file.py",
+                "diff": "*** Begin Patch\n*** Update File: file.py\n@@ hello world\n-hello world\n+hello universe\n*** End Patch",
+            }
+        )
+        assert result.success is False
+        # Must mention V4A wrapper markers — not "Context mismatch" or "file may have changed"
+        assert (
+            "V4A" in result.error["message"]
+            or "wrapper" in result.error["message"].lower()
+        )
+        assert "file may have changed" not in result.error["message"]
+
+    @pytest.mark.asyncio
+    async def test_update_file_marker_in_diff_returns_actionable_error(
+        self, tmp_path: Path
+    ) -> None:
+        """When diff contains '*** Update File:', error should be actionable."""
+        (tmp_path / "file.py").write_text("hello\n")
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "file.py",
+                "diff": "*** Update File: file.py\n@@\n-hello\n+goodbye",
+            }
+        )
+        assert result.success is False
+        assert (
+            "V4A" in result.error["message"]
+            or "wrapper" in result.error["message"].lower()
+        )
+
+    @pytest.mark.asyncio
+    async def test_add_file_marker_in_diff_returns_actionable_error(
+        self, tmp_path: Path
+    ) -> None:
+        """When diff contains '*** Add File:', error should be actionable."""
+        (tmp_path / "file.py").write_text("hello\n")
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "file.py",
+                "diff": "*** Add File: file.py\n+hello\n+goodbye",
+            }
+        )
+        assert result.success is False
+        assert (
+            "V4A" in result.error["message"]
+            or "wrapper" in result.error["message"].lower()
+        )
+
+    @pytest.mark.asyncio
+    async def test_begin_patch_in_create_diff_returns_actionable_error(
+        self, tmp_path: Path
+    ) -> None:
+        """V4A detection should also work for create_file operations."""
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "new.py",
+                "diff": "*** Begin Patch\n*** Add File: new.py\n+print('hello')\n*** End Patch",
+            }
+        )
+        assert result.success is False
+        assert (
+            "V4A" in result.error["message"]
+            or "wrapper" in result.error["message"].lower()
+        )
+        assert "file may have changed" not in result.error["message"]
+
+    @pytest.mark.asyncio
+    async def test_clean_diff_still_works(self, tmp_path: Path) -> None:
+        """Clean raw hunks (no V4A wrapper) should still succeed."""
+        (tmp_path / "file.py").write_text("hello\n")
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "file.py",
+                "diff": "@@\n-hello\n+goodbye",
+            }
+        )
+        assert result.success is True
+        assert (tmp_path / "file.py").read_text() == "goodbye\n"

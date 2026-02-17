@@ -2,7 +2,7 @@
 
 You have access to multiple file editing tools. Choose the right one for the job:
 
-## apply_patch (V4A format)
+## apply_patch
 
 **Best for:** Multi-file changes, large refactors, adding new files, deleting files, renaming files.
 
@@ -10,10 +10,9 @@ Use `apply_patch` when you need to:
 - Modify multiple files in a single operation
 - Create new files from scratch
 - Delete or rename files
-- Make surgical changes with clear context anchors
+- Make surgical changes with context anchors
 
-The patch format uses `*** Begin Patch` / `*** End Patch` markers with context-based hunks.
-Show 3 lines of context above and below each change. Use `@@` anchors to locate changes.
+The tool description contains the complete format reference.
 
 ## edit_file (string replacement)
 

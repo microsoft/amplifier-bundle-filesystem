@@ -318,3 +318,42 @@ class TestFunctionEngineErrors:
         )
         result = await engine.execute({"patch": patch})
         assert result.success is False
+
+
+class TestFunctionEngineEnrichedDescription:
+    """Function engine description should be self-sufficient for V4A format guidance."""
+
+    def test_description_mentions_begin_patch_marker(self, tmp_path: Path) -> None:
+        engine = _make_engine(tmp_path)
+        desc = engine.description
+        assert "*** Begin Patch" in desc
+
+    def test_description_mentions_end_patch_marker(self, tmp_path: Path) -> None:
+        engine = _make_engine(tmp_path)
+        desc = engine.description
+        assert "*** End Patch" in desc
+
+    def test_description_mentions_action_markers(self, tmp_path: Path) -> None:
+        engine = _make_engine(tmp_path)
+        desc = engine.description
+        assert "*** Add File:" in desc
+        assert "*** Update File:" in desc
+        assert "*** Delete File:" in desc
+
+    def test_description_mentions_hunk_syntax(self, tmp_path: Path) -> None:
+        engine = _make_engine(tmp_path)
+        desc = engine.description
+        assert "@@" in desc
+
+    def test_description_mentions_line_prefixes(self, tmp_path: Path) -> None:
+        engine = _make_engine(tmp_path)
+        desc = engine.description
+        # Must explain +/- prefixes for add/delete lines
+        assert "+" in desc
+        assert "-" in desc
+
+    def test_input_schema_patch_description_mentions_v4a(self, tmp_path: Path) -> None:
+        engine = _make_engine(tmp_path)
+        schema = engine.input_schema
+        patch_desc = schema["properties"]["patch"]["description"]
+        assert "*** Begin Patch" in patch_desc or "V4A" in patch_desc

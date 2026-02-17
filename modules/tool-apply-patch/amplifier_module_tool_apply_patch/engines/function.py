@@ -57,8 +57,24 @@ class FunctionEngine:
     def description(self) -> str:
         return (
             "Apply a patch to files using the V4A diff format. "
-            "Supports adding, updating, deleting, and renaming files in a single patch. "
-            "The patch must be wrapped in '*** Begin Patch' and '*** End Patch' markers."
+            "Supports adding, updating, deleting, and renaming files in a single patch.\n\n"
+            "Format:\n"
+            "- Wrap the entire patch in '*** Begin Patch' and '*** End Patch' markers.\n"
+            "- Each file operation starts with an action marker:\n"
+            "  '*** Add File: <path>' — create a new file (lines prefixed with +)\n"
+            "  '*** Update File: <path>' — modify an existing file\n"
+            "  '*** Delete File: <path>' — remove a file\n"
+            "- For updates, use '@@' anchors with optional context to locate changes:\n"
+            "  '@@ <context line>' anchors to a specific line in the file.\n"
+            "  '@@' alone (bare anchor) matches from the current position.\n"
+            "- Line prefixes: '+' = add line, '-' = remove line, ' ' (space) = context line.\n\n"
+            "Example:\n"
+            "*** Begin Patch\n"
+            "*** Update File: src/main.py\n"
+            "@@ def hello():\n"
+            "-    return 'old'\n"
+            "+    return 'new'\n"
+            "*** End Patch"
         )
 
     @property
@@ -68,7 +84,11 @@ class FunctionEngine:
             "properties": {
                 "patch": {
                     "type": "string",
-                    "description": "The patch content in V4A format",
+                    "description": (
+                        "The patch content in V4A format. "
+                        "Must be wrapped in '*** Begin Patch' / '*** End Patch' markers. "
+                        "See tool description for full format reference."
+                    ),
                 },
             },
             "required": ["patch"],

@@ -22,6 +22,15 @@ from ..apply_diff import apply_diff
 
 logger = logging.getLogger(__name__)
 
+# V4A wrapper markers that should NOT appear in the native engine's diff input.
+# If present, the model sent V4A-wrapped content instead of raw hunks.
+_V4A_MARKERS = (
+    "*** Begin Patch",
+    "*** Update File:",
+    "*** Add File:",
+    "*** Delete File:",
+)
+
 
 class NativeEngine:
     """Native engine: handles pre-parsed operations from the Responses API.
@@ -110,6 +119,22 @@ class NativeEngine:
         self, resolved: Path, rel_path: str, diff: str
     ) -> ToolResult:
         """Create a new file. Diff contains +lines."""
+        # Detect V4A wrapper markers before attempting to apply the diff.
+        for marker in _V4A_MARKERS:
+            if marker in diff:
+                return ToolResult(
+                    success=False,
+                    error={
+                        "message": (
+                            f"The diff parameter contains V4A wrapper markers ('{marker}') "
+                            "which should not be included. The native engine expects only "
+                            "raw diff hunks (@@, +/-, context lines). "
+                            "The V4A envelope is handled automatically — "
+                            "provide only the diff content for this file."
+                        )
+                    },
+                )
+
         try:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             content = apply_diff("", diff, mode="create")
@@ -134,6 +159,24 @@ class NativeEngine:
                 success=False,
                 error={"message": f"File not found: {rel_path}"},
             )
+
+        # Detect V4A wrapper markers before attempting to apply the diff.
+        # Models sometimes send the full V4A envelope (*** Begin Patch, etc.)
+        # when they should send only raw diff hunks (@@, +/-, context lines).
+        for marker in _V4A_MARKERS:
+            if marker in diff:
+                return ToolResult(
+                    success=False,
+                    error={
+                        "message": (
+                            f"The diff parameter contains V4A wrapper markers ('{marker}') "
+                            "which should not be included. The native engine expects only "
+                            "raw diff hunks (@@, +/-, context lines). "
+                            "The V4A envelope is handled automatically — "
+                            "provide only the diff content for this file."
+                        )
+                    },
+                )
 
         try:
             existing = resolved.read_text(encoding="utf-8")
