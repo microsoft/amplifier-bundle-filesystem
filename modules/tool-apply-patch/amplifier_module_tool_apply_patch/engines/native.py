@@ -135,6 +135,19 @@ class NativeEngine:
                     },
                 )
 
+        # Reject create_file if file already exists — the model should use update_file instead.
+        # Without this check, the model gets a success signal and may loop indefinitely.
+        if resolved.exists():
+            return ToolResult(
+                success=False,
+                error={
+                    "message": (
+                        f"File already exists: {rel_path}. "
+                        "Use update_file to modify existing files."
+                    )
+                },
+            )
+
         try:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             content = apply_diff("", diff, mode="create")
