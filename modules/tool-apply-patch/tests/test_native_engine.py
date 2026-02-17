@@ -13,13 +13,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import sys
-
-sys.path.insert(
-    0,
-    str(Path(__file__).resolve().parent.parent.parent.parent / "shared"),
-)
-
 from amplifier_module_tool_apply_patch.engines.native import NativeEngine
 
 

@@ -181,15 +181,7 @@ class NativeEngine:
 
     def _validate_path(self, resolved: Path) -> tuple[bool, str | None]:
         """Validate path against allow/deny lists."""
-        import sys
-
-        bundle_shared = str(
-            Path(__file__).resolve().parent.parent.parent.parent / "shared"
-        )
-        if bundle_shared not in sys.path:
-            sys.path.insert(0, bundle_shared)
-
-        from filesystem_utils.path_validation import is_path_allowed  # type: ignore[import-not-found]
+        from ..path_validation import is_path_allowed
 
         return is_path_allowed(
             resolved, self.allowed_write_paths, self.denied_write_paths

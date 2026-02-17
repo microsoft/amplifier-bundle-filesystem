@@ -8,7 +8,6 @@ to the filesystem. Works with any provider.
 from __future__ import annotations
 
 import logging
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -267,14 +266,7 @@ class FunctionEngine:
 
     def _validate_path(self, resolved: Path) -> None:
         """Validate path against allow/deny lists. Raises _PatchError on denial."""
-        # Import shared validation
-        bundle_shared = str(
-            Path(__file__).resolve().parent.parent.parent.parent.parent / "shared"
-        )
-        if bundle_shared not in sys.path:
-            sys.path.insert(0, bundle_shared)
-
-        from filesystem_utils.path_validation import is_path_allowed  # type: ignore[import-not-found]
+        from ..path_validation import is_path_allowed
 
         allowed, error_msg = is_path_allowed(
             resolved, self.allowed_write_paths, self.denied_write_paths

@@ -13,14 +13,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# We need sys.path for the shared utils
-import sys
-
-sys.path.insert(
-    0,
-    str(Path(__file__).resolve().parent.parent.parent.parent / "shared"),
-)
-
 from amplifier_module_tool_apply_patch.engines.function import FunctionEngine
 
 

@@ -8,18 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
-# We import from the shared package at the bundle level.
-# The module's sys.path must include the shared/ directory.
-# For tests, we add it explicitly.
-import sys
-
-sys.path.insert(
-    0,
-    str(Path(__file__).resolve().parent.parent.parent.parent / "shared"),
+from amplifier_module_tool_apply_patch.path_validation import (
+    is_path_allowed,
+    is_in_path_list,
 )
-
-from filesystem_utils.path_validation import is_path_allowed, is_in_path_list
 
 
 class TestIsInPathList:
