@@ -73,6 +73,46 @@ class TestNativeEngineCreateFile:
         assert result.success is True
         assert (tmp_path / "src" / "lib" / "utils.py").exists()
 
+    @pytest.mark.asyncio
+    async def test_create_file_already_exists_returns_error(
+        self, tmp_path: Path
+    ) -> None:
+        """create_file on an existing file should fail, not silently overwrite."""
+        existing = tmp_path / "already.py"
+        existing.write_text("original content\n")
+
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "already.py",
+                "diff": "+overwritten content\n",
+            }
+        )
+        assert result.success is False
+        assert "already exists" in result.error["message"].lower()
+        # File content must be unchanged — no silent overwrite
+        assert existing.read_text() == "original content\n"
+
+    @pytest.mark.asyncio
+    async def test_create_file_already_exists_suggests_update(
+        self, tmp_path: Path
+    ) -> None:
+        """Error message should tell the model to use update_file instead."""
+        existing = tmp_path / "config.yaml"
+        existing.write_text("key: value\n")
+
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "config.yaml",
+                "diff": "+key: new_value\n",
+            }
+        )
+        assert result.success is False
+        assert "update_file" in result.error["message"]
+
 
 class TestNativeEngineUpdateFile:
     @pytest.mark.asyncio
