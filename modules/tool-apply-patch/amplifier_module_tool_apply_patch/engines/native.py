@@ -13,6 +13,7 @@ Operation types:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,76 @@ def _format_content_hint(content: str, path: str) -> str:
         numbered = f"{head}\n... [{omitted} lines omitted] ...\n{tail}"
 
     return f"\n\nCurrent content of {path} ({total} lines):\n{numbered}"
+
+
+def _normalize_unified_diff(diff: str, mode: str) -> str:
+    """Strip standard unified diff headers so the V4A parser can handle the content.
+
+    Processes line-by-line. Header patterns (diff --git, ---, +++, numeric @@)
+    are stripped only from the top of the diff (before the first +/-/space content
+    line). The ``\\ `` no-newline marker is stripped everywhere.
+
+    Args:
+        diff: Raw diff string (may be unified or V4A format).
+        mode: "create" strips ALL @@ lines. "default" only strips numeric @@ lines,
+              preserving V4A text anchors like ``@@ def hello():``.
+    """
+    lines = diff.split("\n")
+    result: list[str] = []
+    in_content = False
+    stripped = 0
+
+    for line in lines:
+        # Always strip "\ No newline at end of file" markers (can appear anywhere)
+        if line.startswith("\\ "):
+            stripped += 1
+            continue
+
+        # Once we've seen a content line, pass everything through unchanged
+        if in_content:
+            result.append(line)
+            continue
+
+        # --- Top-only header stripping (before first content line) ---
+
+        # Git diff preamble: "diff --git a/foo b/foo"
+        if line.startswith("diff --git "):
+            stripped += 1
+            continue
+
+        # Old-file header: "--- /dev/null" or "--- a/path"
+        if line.startswith("--- "):
+            stripped += 1
+            continue
+
+        # New-file header: "+++ b/path"
+        if line.startswith("+++ "):
+            stripped += 1
+            continue
+
+        # Numeric hunk header: "@@ -0,0 +1,3 @@" or "@@ -1,5 +1,7 @@ def hello():"
+        if re.match(r"^@@ -\d+", line):
+            stripped += 1
+            continue
+
+        # In create mode, strip ALL @@ lines (no V4A anchors expected in creates)
+        if mode == "create" and line.startswith("@@"):
+            stripped += 1
+            continue
+
+        # Content line: +, -, or space prefix marks start of actual diff content
+        if line and line[0] in ("+", "-", " "):
+            in_content = True
+            result.append(line)
+            continue
+
+        # Unrecognized line (e.g., V4A text anchor like "@@ def hello():"): pass through
+        result.append(line)
+
+    if stripped:
+        logger.debug("Stripped %d unified diff header lines from diff input", stripped)
+
+    return "\n".join(result)
 
 
 class NativeEngine:
@@ -188,6 +259,8 @@ class NativeEngine:
                 },
             )
 
+        diff = _normalize_unified_diff(diff, "create")
+
         try:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             content = apply_diff("", diff, mode="create")
@@ -239,6 +312,8 @@ class NativeEngine:
                 success=False,
                 error={"message": f"OS error reading {rel_path}: {e}"},
             )
+
+        diff = _normalize_unified_diff(diff, "default")
 
         try:
             updated = apply_diff(existing, diff)
