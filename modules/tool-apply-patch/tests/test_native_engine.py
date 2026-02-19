@@ -408,3 +408,216 @@ class TestNativeEngineV4ADetection:
         )
         assert result.success is True
         assert (tmp_path / "file.py").read_text() == "goodbye\n"
+
+
+class TestNativeEngineUnifiedDiffCreate:
+    """Unified diff normalization: create mode."""
+
+    @pytest.mark.asyncio
+    async def test_unified_diff_headers_stripped_on_create(
+        self, tmp_path: Path
+    ) -> None:
+        """Standard unified diff headers (---, +++, @@) are stripped on create."""
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "hello.py",
+                "diff": (
+                    "--- /dev/null\n"
+                    "+++ b/hello.py\n"
+                    "@@ -0,0 +1,2 @@\n"
+                    "+print('hello')\n"
+                    "+print('world')"
+                ),
+            }
+        )
+        assert result.success is True
+        content = (tmp_path / "hello.py").read_text()
+        assert content == "print('hello')\nprint('world')"
+
+    @pytest.mark.asyncio
+    async def test_diff_git_preamble_stripped_on_create(self, tmp_path: Path) -> None:
+        """diff --git preamble followed by standard headers is stripped."""
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "hello.py",
+                "diff": (
+                    "diff --git a/hello.py b/hello.py\n"
+                    "--- /dev/null\n"
+                    "+++ b/hello.py\n"
+                    "@@ -0,0 +1,2 @@\n"
+                    "+print('hello')\n"
+                    "+print('world')"
+                ),
+            }
+        )
+        assert result.success is True
+        content = (tmp_path / "hello.py").read_text()
+        assert content == "print('hello')\nprint('world')"
+
+    @pytest.mark.asyncio
+    async def test_valid_v4a_create_passes_through_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        """Already-valid V4A create diff (only + lines) is not modified."""
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "hello.py",
+                "diff": "+print('hello')\n+print('world')",
+            }
+        )
+        assert result.success is True
+        content = (tmp_path / "hello.py").read_text()
+        assert content == "print('hello')\nprint('world')"
+
+    @pytest.mark.asyncio
+    async def test_no_newline_marker_stripped_on_create(self, tmp_path: Path) -> None:
+        """\\ No newline at end of file marker is stripped."""
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "hello.py",
+                "diff": (
+                    "--- /dev/null\n"
+                    "+++ b/hello.py\n"
+                    "@@ -0,0 +1,2 @@\n"
+                    "+print('hello')\n"
+                    "+print('world')\n"
+                    "\\ No newline at end of file"
+                ),
+            }
+        )
+        assert result.success is True
+        content = (tmp_path / "hello.py").read_text()
+        assert content == "print('hello')\nprint('world')"
+
+
+class TestNativeEngineUnifiedDiffUpdate:
+    """Unified diff normalization: update mode."""
+
+    @pytest.mark.asyncio
+    async def test_unified_diff_headers_stripped_on_update(
+        self, tmp_path: Path
+    ) -> None:
+        """Unified diff with --- a/path, +++ b/path, numeric @@ is normalized for update."""
+        target = tmp_path / "main.py"
+        target.write_text("line1\nold_line\nline3\n")
+
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "main.py",
+                "diff": (
+                    "--- a/main.py\n"
+                    "+++ b/main.py\n"
+                    "@@ -1,3 +1,3 @@\n"
+                    " line1\n"
+                    "-old_line\n"
+                    "+new_line\n"
+                    " line3"
+                ),
+            }
+        )
+        assert result.success is True
+        assert target.read_text() == "line1\nnew_line\nline3\n"
+
+    @pytest.mark.asyncio
+    async def test_v4a_text_anchor_preserved_on_update(self, tmp_path: Path) -> None:
+        """V4A text anchor (@@ def hello():) must NOT be stripped — critical no-regression."""
+        target = tmp_path / "main.py"
+        target.write_text("def hello():\n    old_line\n    other_line\n")
+
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "main.py",
+                "diff": "@@ def hello():\n-    old_line\n+    new_line",
+            }
+        )
+        assert result.success is True
+        assert target.read_text() == "def hello():\n    new_line\n    other_line\n"
+
+    @pytest.mark.asyncio
+    async def test_numeric_hunk_header_with_trailing_context_stripped(
+        self, tmp_path: Path
+    ) -> None:
+        """Numeric @@ -N,M +N,M @@ with trailing function name is stripped."""
+        target = tmp_path / "main.py"
+        target.write_text("def hello():\n    old_line\n    other_line\n")
+
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "main.py",
+                "diff": (
+                    "@@ -1,3 +1,3 @@ def hello():\n"
+                    "-    old_line\n"
+                    "+    new_line\n"
+                    "     other_line"
+                ),
+            }
+        )
+        assert result.success is True
+        assert target.read_text() == "def hello():\n    new_line\n    other_line\n"
+
+
+class TestNativeEngineUnifiedDiffEdgeCases:
+    """Unified diff normalization: edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_empty_diff_passes_through(self, tmp_path: Path) -> None:
+        """Empty diff passes through the normalizer unchanged."""
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "empty.py",
+                "diff": "",
+            }
+        )
+        # Empty diff in create mode creates an empty file
+        assert result.success is True
+        assert (tmp_path / "empty.py").read_text() == ""
+
+    @pytest.mark.asyncio
+    async def test_headers_only_no_content_creates_empty_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Diff with only headers and no content lines normalizes to empty."""
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "empty.py",
+                "diff": ("--- /dev/null\n+++ b/empty.py\n@@ -0,0 +1,0 @@"),
+            }
+        )
+        # All headers stripped, empty diff creates empty file
+        assert result.success is True
+        assert (tmp_path / "empty.py").read_text() == ""
+
+    @pytest.mark.asyncio
+    async def test_triple_plus_in_content_not_stripped(self, tmp_path: Path) -> None:
+        """+++ line appearing after content has started must NOT be stripped."""
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "hello.py",
+                "diff": ("+first line\n+++ second line\n+third line"),
+            }
+        )
+        assert result.success is True
+        content = (tmp_path / "hello.py").read_text()
+        # "+++ second line" is a content line (starts with +), NOT a header.
+        # The parser strips the leading + to get "++ second line" as file content.
+        assert content == "first line\n++ second line\nthird line"
