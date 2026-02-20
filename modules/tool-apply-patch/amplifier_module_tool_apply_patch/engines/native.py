@@ -130,6 +130,15 @@ def _normalize_unified_diff(diff: str, mode: str) -> str:
         # Unrecognized line (e.g., V4A text anchor like "@@ def hello():"): pass through
         result.append(line)
 
+    # In create mode, the Responses API often sends bare content without the
+    # required '+' prefix on each line. Since every line in a create is an
+    # addition by definition, we normalize by adding '+' prefixes.
+    if mode == "create" and result:
+        has_bare = any(line and not line.startswith("+") for line in result)
+        if has_bare:
+            result = [line if line.startswith("+") else "+" + line for line in result]
+            logger.debug("Added '+' prefix to bare content lines in create diff")
+
     if stripped:
         logger.debug("Stripped %d unified diff header lines from diff input", stripped)
 

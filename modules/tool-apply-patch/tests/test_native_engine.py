@@ -497,6 +497,28 @@ class TestNativeEngineUnifiedDiffCreate:
         content = (tmp_path / "hello.py").read_text()
         assert content == "print('hello')\nprint('world')"
 
+    @pytest.mark.asyncio
+    async def test_create_file_with_raw_content_no_plus_prefixes(
+        self, tmp_path: Path
+    ) -> None:
+        """Raw content without '+' prefixes is normalized and file is created.
+
+        This is the exact scenario from the Responses API bug: the API sends
+        bare markdown/code content, not unified-diff-formatted '+' lines.
+        Empty lines in the content must also be handled correctly.
+        """
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "readme.md",
+                "diff": "# Title\n\nSome body text\nMore content",
+            }
+        )
+        assert result.success is True
+        content = (tmp_path / "readme.md").read_text()
+        assert content == "# Title\n\nSome body text\nMore content"
+
 
 class TestNativeEngineUnifiedDiffUpdate:
     """Unified diff normalization: update mode."""
