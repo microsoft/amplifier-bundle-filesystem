@@ -519,6 +519,26 @@ class TestNativeEngineUnifiedDiffCreate:
         content = (tmp_path / "readme.md").read_text()
         assert content == "# Title\n\nSome body text\nMore content"
 
+    @pytest.mark.asyncio
+    async def test_create_file_with_mixed_prefixes(self, tmp_path: Path) -> None:
+        """Content where some lines have '+' prefix and some don't.
+
+        Lines already prefixed with '+' are left alone. Lines without '+'
+        get the prefix added. This handles the edge case where bare content
+        happens to have lines starting with '+'.
+        """
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "mixed.py",
+                "diff": "+print('hello')\nbare line\n+print('world')",
+            }
+        )
+        assert result.success is True
+        content = (tmp_path / "mixed.py").read_text()
+        assert content == "print('hello')\nbare line\nprint('world')"
+
 
 class TestNativeEngineUnifiedDiffUpdate:
     """Unified diff normalization: update mode."""
