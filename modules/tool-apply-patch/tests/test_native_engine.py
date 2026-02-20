@@ -611,6 +611,31 @@ class TestNativeEngineUnifiedDiffUpdate:
         assert result.success is True
         assert target.read_text() == "def hello():\n    new_line\n    other_line\n"
 
+    @pytest.mark.asyncio
+    async def test_update_file_with_bare_content_still_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """update_file with bare content (no +/-/space prefixes) must still fail.
+
+        The create-mode normalization must NOT affect update operations.
+        Update diffs require semantic +/-/space prefixes — bare content is
+        always an error there.
+        """
+        target = tmp_path / "existing.py"
+        target.write_text("original content\n")
+
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "existing.py",
+                "diff": "bare content without any diff prefixes",
+            }
+        )
+        assert result.success is False
+        # Original file must be unchanged — no silent modification
+        assert target.read_text() == "original content\n"
+
 
 class TestNativeEngineUnifiedDiffEdgeCases:
     """Unified diff normalization: edge cases."""
