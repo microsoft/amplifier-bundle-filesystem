@@ -130,7 +130,7 @@ def _parse_create_diff(lines: list[str], newline: str) -> str:
         line = parser.lines[parser.index]
         parser.index += 1
         if not line.startswith("+"):
-            raise ValueError(f"Invalid Add File Line: {line}")
+            raise ValueError(f"Create diff line missing '+' prefix: {line[:80]}")
         output.append(line[1:])
 
     return newline.join(output)

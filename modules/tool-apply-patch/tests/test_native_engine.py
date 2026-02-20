@@ -497,6 +497,48 @@ class TestNativeEngineUnifiedDiffCreate:
         content = (tmp_path / "hello.py").read_text()
         assert content == "print('hello')\nprint('world')"
 
+    @pytest.mark.asyncio
+    async def test_create_file_with_raw_content_no_plus_prefixes(
+        self, tmp_path: Path
+    ) -> None:
+        """Raw content without '+' prefixes is normalized and file is created.
+
+        This is the exact scenario from the Responses API bug: the API sends
+        bare markdown/code content, not unified-diff-formatted '+' lines.
+        Empty lines in the content must also be handled correctly.
+        """
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "readme.md",
+                "diff": "# Title\n\nSome body text\nMore content",
+            }
+        )
+        assert result.success is True
+        content = (tmp_path / "readme.md").read_text()
+        assert content == "# Title\n\nSome body text\nMore content"
+
+    @pytest.mark.asyncio
+    async def test_create_file_with_mixed_prefixes(self, tmp_path: Path) -> None:
+        """Content where some lines have '+' prefix and some don't.
+
+        Lines already prefixed with '+' are left alone. Lines without '+'
+        get the prefix added. This handles the edge case where bare content
+        happens to have lines starting with '+'.
+        """
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "create_file",
+                "path": "mixed.py",
+                "diff": "+print('hello')\nbare line\n+print('world')",
+            }
+        )
+        assert result.success is True
+        content = (tmp_path / "mixed.py").read_text()
+        assert content == "print('hello')\nbare line\nprint('world')"
+
 
 class TestNativeEngineUnifiedDiffUpdate:
     """Unified diff normalization: update mode."""
@@ -568,6 +610,31 @@ class TestNativeEngineUnifiedDiffUpdate:
         )
         assert result.success is True
         assert target.read_text() == "def hello():\n    new_line\n    other_line\n"
+
+    @pytest.mark.asyncio
+    async def test_update_file_with_bare_content_still_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """update_file with bare content (no +/-/space prefixes) must still fail.
+
+        The create-mode normalization must NOT affect update operations.
+        Update diffs require semantic +/-/space prefixes — bare content is
+        always an error there.
+        """
+        target = tmp_path / "existing.py"
+        target.write_text("original content\n")
+
+        engine = _make_engine(tmp_path)
+        result = await engine.execute(
+            {
+                "type": "update_file",
+                "path": "existing.py",
+                "diff": "bare content without any diff prefixes",
+            }
+        )
+        assert result.success is False
+        # Original file must be unchanged — no silent modification
+        assert target.read_text() == "original content\n"
 
 
 class TestNativeEngineUnifiedDiffEdgeCases:
