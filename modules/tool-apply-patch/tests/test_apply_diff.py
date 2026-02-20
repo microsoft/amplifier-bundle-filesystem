@@ -27,6 +27,12 @@ def test_apply_diff_create_mode_requires_plus_prefix() -> None:
         apply_diff("", diff, mode="create")
 
 
+def test_apply_diff_create_mode_error_message_describes_missing_prefix() -> None:
+    """Error message should say 'missing +' prefix', not 'Invalid Add File Line'."""
+    with pytest.raises(ValueError, match=r"missing '\+' prefix"):
+        apply_diff("", "plain line without prefix", mode="create")
+
+
 def test_apply_diff_create_mode_perserves_trailing_newline() -> None:
     diff = "\n".join(["+hello", "+world", "+"])
     assert apply_diff("", diff, mode="create") == "hello\nworld\n"
