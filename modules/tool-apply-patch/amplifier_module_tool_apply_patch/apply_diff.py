@@ -18,9 +18,47 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Literal
 
 ApplyDiffMode = Literal["default", "create"]
+
+_UTF8_BOM = b"\xef\xbb\xbf"
+
+
+def read_source(path: Path) -> tuple[str, bool]:
+    """Read a source file for patching, preserving its EXACT line endings.
+
+    Returns ``(text, had_bom)``. Uses ``read_bytes`` + ``decode`` (NOT
+    ``read_text``) on purpose:
+
+    - ``read_text`` opens in text mode with *universal newlines*, which silently
+      rewrites every ``\\r\\n`` to ``\\n`` on read. The newline style is then lost,
+      apply_diff re-emits LF, and a plain text-mode write re-translates ``\\n`` to
+      ``\\r\\n`` on Windows -- so a one-line patch rewrites the entire file's line
+      endings (a whole-file diff, and LF-enforced repos silently drift to CRLF).
+      Decoding bytes does no newline translation, so ``\\r\\n`` survives verbatim
+      for :func:`_detect_newline` to preserve.
+    - ``utf-8-sig`` strips a leading UTF-8 BOM (common in Windows-authored files)
+      so it does not glue ``U+FEFF`` onto line 1 and break context matching.
+      ``had_bom`` lets the writer restore it.
+    """
+    raw = path.read_bytes()
+    had_bom = raw.startswith(_UTF8_BOM)
+    return raw.decode("utf-8-sig"), had_bom
+
+
+def write_source(path: Path, text: str, had_bom: bool = False) -> None:
+    """Write patched content byte-exactly -- no OS newline translation, no BOM surprise.
+
+    ``write_bytes`` avoids Windows text-mode's ``\\n`` -> ``\\r\\n`` translation
+    entirely, so the line-ending style apply_diff chose (matching the original
+    file) is preserved verbatim. A BOM is restored only if the original had one.
+    """
+    data = text.encode("utf-8")
+    if had_bom:
+        data = _UTF8_BOM + data
+    path.write_bytes(data)
 
 
 @dataclass
