@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from amplifier_core import ModuleCoordinator, ToolResult
 
-from ..apply_diff import apply_diff
+from ..apply_diff import apply_diff, read_source, write_source
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +260,7 @@ class FunctionEngine:
         if resolved.exists():
             # Include current content so the model can craft an update diff instead.
             try:
-                current = resolved.read_text(encoding="utf-8")
+                current, _ = read_source(resolved)
                 content_hint = _format_content_hint(current, op.path)
             except OSError:
                 content_hint = ""
@@ -274,7 +274,7 @@ class FunctionEngine:
 
         # Use apply_diff in create mode to process +lines
         content = apply_diff("", op.diff, mode="create")
-        resolved.write_text(content, encoding="utf-8")
+        write_source(resolved, content)
 
         await self._emit_event("apply-patch:applied", op.path, "add")
         return f"A {op.path}"
@@ -284,7 +284,7 @@ class FunctionEngine:
         if not resolved.exists():
             raise _PatchError(f"File not found: {op.path}")
 
-        existing = resolved.read_text(encoding="utf-8")
+        existing, had_bom = read_source(resolved)
 
         try:
             updated = apply_diff(existing, op.diff)
@@ -303,12 +303,17 @@ class FunctionEngine:
             new_resolved = self._resolve_path(op.move_to)
             self._validate_path(new_resolved)
             new_resolved.parent.mkdir(parents=True, exist_ok=True)
-            new_resolved.write_text(updated, encoding="utf-8")
-            resolved.unlink()
+            write_source(new_resolved, updated, had_bom)
+            try:
+                resolved.unlink()
+            except OSError as e:
+                # On Windows, unlink raises PermissionError [WinError 32] if the
+                # file is held open by another process (AV, editor, indexer).
+                raise _PatchError(f"Could not remove original after rename: {e}") from e
             await self._emit_event("apply-patch:applied", op.path, "rename")
             return f"R {op.path} -> {op.move_to}"
         else:
-            resolved.write_text(updated, encoding="utf-8")
+            write_source(resolved, updated, had_bom)
             await self._emit_event("apply-patch:applied", op.path, "update")
             return f"M {op.path}"
 
@@ -317,7 +322,12 @@ class FunctionEngine:
         if not resolved.exists():
             raise _PatchError(f"File not found: {op.path}")
 
-        resolved.unlink()
+        try:
+            resolved.unlink()
+        except OSError as e:
+            # On Windows, unlink raises PermissionError [WinError 32] if the file
+            # is held open by another process (AV, editor, indexer).
+            raise _PatchError(f"Could not delete {op.path}: {e}") from e
         await self._emit_event("apply-patch:applied", op.path, "delete")
         return f"D {op.path}"
 

@@ -19,7 +19,7 @@ from typing import Any
 
 from amplifier_core import ModuleCoordinator, ToolResult
 
-from ..apply_diff import apply_diff
+from ..apply_diff import apply_diff, read_source, write_source
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +253,7 @@ class NativeEngine:
         # Include current content so the model can immediately craft an update_file diff.
         if resolved.exists():
             try:
-                current = resolved.read_text(encoding="utf-8")
+                current, _ = read_source(resolved)
                 content_hint = _format_content_hint(current, rel_path)
             except OSError:
                 content_hint = ""
@@ -273,7 +273,7 @@ class NativeEngine:
         try:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             content = apply_diff("", diff, mode="create")
-            resolved.write_text(content, encoding="utf-8")
+            write_source(resolved, content)
             await self._emit_event("apply-patch:applied", rel_path, "create")
             return ToolResult(success=True, output=f"A {rel_path}")
         except ValueError as e:
@@ -315,7 +315,7 @@ class NativeEngine:
 
         # Read file before the try so `existing` is always in scope for error handling.
         try:
-            existing = resolved.read_text(encoding="utf-8")
+            existing, had_bom = read_source(resolved)
         except OSError as e:
             return ToolResult(
                 success=False,
@@ -326,7 +326,7 @@ class NativeEngine:
 
         try:
             updated = apply_diff(existing, diff)
-            resolved.write_text(updated, encoding="utf-8")
+            write_source(resolved, updated, had_bom)
             await self._emit_event("apply-patch:applied", rel_path, "update")
             return ToolResult(success=True, output=f"M {rel_path}")
         except ValueError as e:
