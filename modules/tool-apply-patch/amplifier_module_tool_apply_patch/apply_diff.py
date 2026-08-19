@@ -136,8 +136,16 @@ def _detect_newline(input: str, diff: str, mode: ApplyDiffMode) -> str:
 
 
 def _normalize_text_newlines(text: str) -> str:
-    # Normalize CRLF to LF for parsing/matching. Newline style is restored when emitting.
-    return text.replace("\r\n", "\n")
+    # Normalize CRLF and lone CR to LF for parsing/matching. Newline style is
+    # restored when emitting.
+    #
+    # The lone-CR case matters because read_source decodes raw bytes and does no
+    # universal-newline translation: a classic-Mac (CR-only) file now reaches the
+    # parser verbatim, where every line would collapse into one and context
+    # matching would fail outright. Folding it here restores the behaviour
+    # read_text() used to provide implicitly. _detect_newline sees no "\n" in such
+    # a file, so it falls through to the diff's style and emits LF -- same as before.
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _is_done(state: ParserState, prefixes: Sequence[str]) -> bool:
@@ -407,4 +415,4 @@ def _apply_chunks(input: str, chunks: list[Chunk], newline: str) -> str:
     return newline.join(dest_lines)
 
 
-__all__ = ["apply_diff"]
+__all__ = ["apply_diff", "read_source", "write_source"]
