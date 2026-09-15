@@ -14,6 +14,16 @@ from amplifier_module_tool_apply_patch.path_validation import (
 )
 
 
+def _set_test_home(tmp_path: Path, monkeypatch) -> Path:
+    """Set an isolated home directory for testing home-relative policy paths."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    assert Path("~").expanduser().resolve() == home.resolve()
+    return home
+
+
 class TestIsInPathList:
     """Tests for is_in_path_list helper."""
 
@@ -61,6 +71,20 @@ class TestIsPathAllowed:
         assert allowed is True
         assert error is None
 
+    def test_home_relative_allow_path_returns_true(self, tmp_path: Path, monkeypatch) -> None:
+        home = _set_test_home(tmp_path, monkeypatch)
+        workspace = home / "workspace"
+        workspace.mkdir()
+
+        allowed, error = is_path_allowed(
+            workspace / "new_file.py",
+            allowed_paths=["~/workspace"],
+            denied_paths=[],
+        )
+
+        assert allowed is True
+        assert error is None
+
     def test_denied_path_returns_false(self, tmp_path: Path) -> None:
         secrets = tmp_path / ".secrets"
         secrets.mkdir()
@@ -83,6 +107,23 @@ class TestIsPathAllowed:
             denied_paths=[str(target)],
         )
         assert allowed is False
+
+    def test_home_relative_deny_overrides_absolute_allow(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        home = _set_test_home(tmp_path, monkeypatch)
+        protected = home / "workspace" / "protected"
+        protected.mkdir(parents=True)
+
+        allowed, error = is_path_allowed(
+            protected / "secret.py",
+            allowed_paths=[str(home)],
+            denied_paths=["~/workspace/protected"],
+        )
+
+        assert allowed is False
+        assert error is not None
+        assert "within denied directories" in error
 
     def test_path_not_in_allow_list_is_denied(self, tmp_path: Path) -> None:
         allowed, error = is_path_allowed(

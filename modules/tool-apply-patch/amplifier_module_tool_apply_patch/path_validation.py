@@ -28,7 +28,7 @@ def is_in_path_list(target: Path, path_list: list[str]) -> bool:
     """
     resolved = target.resolve()
     for p in path_list:
-        p_resolved = Path(p).resolve()
+        p_resolved = Path(p).expanduser().resolve()
         if p_resolved == resolved or p_resolved in resolved.parents:
             return True
     return False
