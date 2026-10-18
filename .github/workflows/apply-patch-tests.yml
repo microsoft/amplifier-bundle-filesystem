@@ -1,0 +1,101 @@
+name: Apply patch module tests
+
+# Preparation branch only. Publishing this branch is the explicit CI admission.
+on:
+  push:
+    branches: [test/patch-mount-working-directory]
+    paths:
+      - modules/tool-apply-patch/**
+      - .github/workflows/apply-patch-tests.yml
+
+permissions:
+  contents: read
+
+jobs:
+  module-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - name: Install exact test dependencies and candidate module
+        run: |
+          mkdir -p evidence
+          python -m pip install --only-binary=amplifier-core \
+            --report evidence/dependencies.json \
+            amplifier-core==2.0.1 pytest==8.3.5 pytest-asyncio==0.26.0 hatchling==1.27.0
+          python -m pip install --no-build-isolation --report evidence/candidate-install.json \
+            ./modules/tool-apply-patch
+      - name: Record source and import readiness
+        id: readiness
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source.txt
+          python -m pip freeze > evidence/packages.txt
+          python - <<'PY' > evidence/imports.txt
+          import importlib.metadata
+          import amplifier_core
+          import amplifier_module_tool_apply_patch
+          import pytest_asyncio
+          from amplifier_core import ModuleCoordinator
+          from amplifier_module_tool_apply_patch import mount
+          from amplifier_module_tool_apply_patch.engines.native import NativeEngine
+          from amplifier_module_tool_apply_patch.engines.function import FunctionEngine
+          for name in ("amplifier-core", "amplifier-module-tool-apply-patch", "pytest", "pytest-asyncio"):
+              print(name, importlib.metadata.version(name))
+          print("core", amplifier_core.__file__)
+          print("patch", amplifier_module_tool_apply_patch.__file__)
+          print("coordinator", ModuleCoordinator.__module__, ModuleCoordinator.__name__)
+          print("mount", mount.__module__, mount.__name__)
+          print("engines", NativeEngine.__name__, FunctionEngine.__name__)
+          PY
+      - name: Existing module baseline
+        working-directory: modules/tool-apply-patch
+        run: |
+          python -m pytest -q -ra tests -k 'not TestMountWorkingDirectory' \
+            --junitxml=../../evidence/baseline.xml
+      - name: Real mount working-directory regressions
+        if: ${{ !cancelled() && steps.readiness.outcome == 'success' }}
+        working-directory: modules/tool-apply-patch
+        run: |
+          python -m pytest -q -ra tests/test_tool.py::TestMountWorkingDirectory \
+            --junitxml=../../evidence/mount-regressions.xml
+      - name: Require all 17 mount cases to execute without skips
+        if: ${{ always() }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          baseline = Path("evidence/baseline.xml")
+          regression = Path("evidence/mount-regressions.xml")
+          problems = []
+          for path in (baseline, regression):
+              if not path.exists():
+                  problems.append(f"Missing test result: {path}")
+                  continue
+              cases = ET.parse(path).getroot().findall(".//testcase")
+              totals = {name: sum(case.find(name) is not None for case in cases)
+                        for name in ("skipped", "failure", "error")}
+              print(path.name, "cases", len(cases), totals)
+              if not cases or any(totals.values()):
+                  problems.append(f"Tests did not all execute and pass: {path}")
+              if path == regression and (len(cases) != 17 or totals["skipped"]):
+                  problems.append("Expected 17 executed mount regressions and zero skips")
+          if problems:
+              raise SystemExit("\n".join(problems))
+          PY
+      - name: Retain exact-source test evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: apply-patch-tests-${{ github.sha }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14

@@ -269,6 +269,8 @@ class TestMountWorkingDirectory:
 
         result = await _mounted_update(tool, engine)
         assert not result.success
+        assert "Access denied:" in result.error["message"]
+        assert "not within allowed write paths" in result.error["message"]
         assert tool._engine.working_dir == str(old)
         assert (old / "file.txt").read_text() == "old\n"
         assert (current / "file.txt").read_text() == "old\n"
