@@ -31,7 +31,7 @@ async def mount(
             - allowed_write_paths: list of allowed directories (default: [working_dir or "."])
             - denied_write_paths: list of denied directories (default: [])
     """
-    config = config or {}
+    config = dict(config or {})
 
     # Get session.working_dir capability if not explicitly configured
     if "working_dir" not in config:
