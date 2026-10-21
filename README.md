@@ -12,6 +12,23 @@ Composes filesystem-related tools and behaviors for Amplifier agents.
 
 - `tool-apply-patch` — V4A diff format file editing with two engine options
 
+### Portable write policy
+
+The `tool-apply-patch` mount configuration accepts `allowed_write_paths`,
+`denied_write_paths`, and optional `additional_allowed_write_paths` (default `[]`)
+for either engine. Every present policy field must be a list of strings; invalid
+values raise a field-only `ValueError`.
+Mount copies the configuration and its policy lists without mutating caller input.
+
+Nonempty additional grants are appended with stable deduplication to the explicit
+allowlist, including `[]`. If the allowlist is omitted, they extend the default
+`[working_dir]` (or `["."]` when no working directory is set). This default is
+selected at mount, after resolving `session.working_dir`; an explicitly configured
+`working_dir` takes precedence, even when empty or null. Missing or empty
+additional grants leave the existing default behavior unchanged. Denies win over
+all grants. Existing relative policy strings keep their current meaning; they are
+not rebased to the session directory.
+
 ## Context
 
 - `editing-guidance.md` — Teaches the model when to use which editing tool
