@@ -7,7 +7,6 @@ to the filesystem. Works with any provider.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -15,8 +14,8 @@ from typing import Any, Literal
 from amplifier_core import ModuleCoordinator, ToolResult
 
 from ..apply_diff import apply_diff, read_source, write_source
+from . import emit_applied
 
-logger = logging.getLogger(__name__)
 
 # V4A operation markers
 _BEGIN_PATCH = "*** Begin Patch"
@@ -276,7 +275,7 @@ class FunctionEngine:
         content = apply_diff("", op.diff, mode="create")
         write_source(resolved, content)
 
-        await self._emit_event("apply-patch:applied", op.path, "add")
+        await emit_applied(self.coordinator, op.path, "add", resolved)
         return f"A {op.path}"
 
     async def _apply_update(self, resolved: Path, op: PatchOperation) -> str:
@@ -309,12 +308,13 @@ class FunctionEngine:
             except OSError as e:
                 # On Windows, unlink raises PermissionError [WinError 32] if the
                 # file is held open by another process (AV, editor, indexer).
+                await emit_applied(self.coordinator, op.move_to, "write", new_resolved)
                 raise _PatchError(f"Could not remove original after rename: {e}") from e
-            await self._emit_event("apply-patch:applied", op.path, "rename")
+            await emit_applied(self.coordinator, op.path, "rename", new_resolved)
             return f"R {op.path} -> {op.move_to}"
         else:
             write_source(resolved, updated, had_bom)
-            await self._emit_event("apply-patch:applied", op.path, "update")
+            await emit_applied(self.coordinator, op.path, "update", resolved)
             return f"M {op.path}"
 
     async def _apply_delete(self, resolved: Path, op: PatchOperation) -> str:
@@ -328,7 +328,7 @@ class FunctionEngine:
             # On Windows, unlink raises PermissionError [WinError 32] if the file
             # is held open by another process (AV, editor, indexer).
             raise _PatchError(f"Could not delete {op.path}: {e}") from e
-        await self._emit_event("apply-patch:applied", op.path, "delete")
+        await emit_applied(self.coordinator, op.path, "delete")
         return f"D {op.path}"
 
     def _resolve_path(self, rel_path: str) -> Path:
@@ -349,16 +349,6 @@ class FunctionEngine:
         )
         if not allowed:
             raise _PatchError(error_msg or "Access denied")
-
-    async def _emit_event(self, event: str, path: str, operation: str) -> None:
-        """Emit an observability event."""
-        try:
-            await self.coordinator.hooks.emit(
-                event, {"path": path, "operation": operation}
-            )
-        except Exception:
-            # Event emission should never break the tool
-            logger.debug(f"Failed to emit {event} for {path}", exc_info=True)
 
 
 class _PatchError(Exception):

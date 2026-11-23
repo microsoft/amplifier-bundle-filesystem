@@ -452,3 +452,33 @@ class TestFunctionEngineEnrichedDescription:
         schema = engine.input_schema
         patch_desc = schema["properties"]["patch"]["description"]
         assert "*** Begin Patch" in patch_desc or "V4A" in patch_desc
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unlink_fails", [False, True])
+async def test_rename_reports_committed_destination_before_a_failure(tmp_path, monkeypatch, unlink_fails):
+    engine = _make_engine(tmp_path)
+    original, destination = tmp_path / "old.py", tmp_path / "new.py"
+    original.write_text("old\n")
+    if unlink_fails:
+        unlink = Path.unlink
+
+        def refuse_original(path, *args, **kwargs):
+            if path == original:
+                raise PermissionError("busy")
+            return unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", refuse_original)
+    result = await engine.execute({"patch": "\n".join([
+        "*** Begin Patch", "*** Update File: old.py", "*** Move to: new.py",
+        "@@", "-old", "+new", "*** Delete File: missing.py", "*** End Patch",
+    ])})
+    assert not result.success and destination.read_text() == "new\n"
+    assert original.exists() is unlink_fails
+    engine.coordinator.hooks.emit.assert_awaited_once_with(
+        "apply-patch:applied", {
+            "path": "new.py" if unlink_fails else "old.py",
+            "operation": "write" if unlink_fails else "rename",
+            "written_path": str(destination),
+        },
+    )
