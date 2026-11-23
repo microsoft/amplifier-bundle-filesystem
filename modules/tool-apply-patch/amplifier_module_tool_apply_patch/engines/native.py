@@ -20,6 +20,7 @@ from typing import Any
 from amplifier_core import ModuleCoordinator, ToolResult
 
 from ..apply_diff import apply_diff, read_source, write_source
+from . import emit_applied
 
 logger = logging.getLogger(__name__)
 
@@ -274,7 +275,7 @@ class NativeEngine:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             content = apply_diff("", diff, mode="create")
             write_source(resolved, content)
-            await self._emit_event("apply-patch:applied", rel_path, "create")
+            await emit_applied(self.coordinator, rel_path, "create", resolved)
             return ToolResult(success=True, output=f"A {rel_path}")
         except ValueError as e:
             return ToolResult(
@@ -327,7 +328,7 @@ class NativeEngine:
         try:
             updated = apply_diff(existing, diff)
             write_source(resolved, updated, had_bom)
-            await self._emit_event("apply-patch:applied", rel_path, "update")
+            await emit_applied(self.coordinator, rel_path, "update", resolved)
             return ToolResult(success=True, output=f"M {rel_path}")
         except ValueError as e:
             # Include current content so the model can construct a correct diff.
@@ -359,7 +360,7 @@ class NativeEngine:
 
         try:
             resolved.unlink()
-            await self._emit_event("apply-patch:applied", rel_path, "delete")
+            await emit_applied(self.coordinator, rel_path, "delete")
             return ToolResult(success=True, output=f"D {rel_path}")
         except OSError as e:
             return ToolResult(
@@ -382,12 +383,3 @@ class NativeEngine:
         return is_path_allowed(
             resolved, self.allowed_write_paths, self.denied_write_paths
         )
-
-    async def _emit_event(self, event: str, path: str, operation: str) -> None:
-        """Emit an observability event."""
-        try:
-            await self.coordinator.hooks.emit(
-                event, {"path": path, "operation": operation}
-            )
-        except Exception:
-            logger.debug(f"Failed to emit {event} for {path}", exc_info=True)
